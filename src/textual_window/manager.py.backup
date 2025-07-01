@@ -241,8 +241,7 @@ class WindowManager(DOMNode):
                 "Window ID not found in the manager. "
                 "Please make sure the window is registered with the manager before unregistering it."
             )
-        if window in self._recent_focus_order:
-            self._recent_focus_order.remove(window)
+        self._recent_focus_order.remove(window)
 
         if self._windowbar:
             self._windowbar.remove_window_button(window)  # type: ignore[unused-ignore]
@@ -262,8 +261,7 @@ class WindowManager(DOMNode):
         # called by Window._on_focus()
 
         if self._recent_focus_order:
-            if window in self._recent_focus_order:
-                self._recent_focus_order.remove(window)
+            self._recent_focus_order.remove(window)
             self._recent_focus_order.insert(0, window)
         else:
             if not self._closing_in_progress:
