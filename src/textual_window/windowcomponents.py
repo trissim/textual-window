@@ -41,6 +41,8 @@ BUTTON_SYMBOLS: dict[str, str] = {
     "rotate_left": "↺",  # Rotate entire list left
     "rotate_right": "↻",  # Rotate entire list right
     "toggle_floating": "⊡",  # Toggle this window's floating state
+    "gap_increase": "+",  # Increase window gap
+    "gap_decrease": "−",  # Decrease window gap
 }
 
 
@@ -442,6 +444,81 @@ class ToggleFloatingButton(NoSelectStatic):
             self.tooltip = "Enable Tiling"
 
 
+class GapIncreaseButton(NoSelectStatic):
+    """Button for increasing the gap between tiled windows."""
+
+    def __init__(self, content: VisualType, window: Window, **kwargs: Any):
+        super().__init__(content=content, **kwargs)
+        self.window = window
+        self.click_started_on: bool = False
+        self.tooltip = "Increase Gaps (Vertical + Horizontal=2x)"
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button == 1:  # left button
+            self.click_started_on = True
+            self.add_class("pressed")
+            self.window.focus()
+
+    def on_mouse_up(self) -> None:
+        self.remove_class("pressed")
+        if self.click_started_on:
+            self._increase_gap()
+            self.click_started_on = False
+
+    def on_leave(self) -> None:
+        self.remove_class("pressed")
+        self.click_started_on = False
+
+    def _increase_gap(self) -> None:
+        """Increase the gap between tiled windows."""
+        from textual_window.manager import window_manager
+
+        current_gap = window_manager.get_window_gap()
+        try:
+            window_manager.set_window_gap(current_gap + 1)
+        except ValueError:
+            # Gap would be too large, ignore
+            pass
+
+
+class GapDecreaseButton(NoSelectStatic):
+    """Button for decreasing the gap between tiled windows."""
+
+    def __init__(self, content: VisualType, window: Window, **kwargs: Any):
+        super().__init__(content=content, **kwargs)
+        self.window = window
+        self.click_started_on: bool = False
+        self.tooltip = "Decrease Gaps (Vertical + Horizontal=2x)"
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button == 1:  # left button
+            self.click_started_on = True
+            self.add_class("pressed")
+            self.window.focus()
+
+    def on_mouse_up(self) -> None:
+        self.remove_class("pressed")
+        if self.click_started_on:
+            self._decrease_gap()
+            self.click_started_on = False
+
+    def on_leave(self) -> None:
+        self.remove_class("pressed")
+        self.click_started_on = False
+
+    def _decrease_gap(self) -> None:
+        """Decrease the gap between tiled windows."""
+        from textual_window.manager import window_manager
+
+        current_gap = window_manager.get_window_gap()
+        if current_gap > 0:
+            try:
+                window_manager.set_window_gap(current_gap - 1)
+            except ValueError:
+                # Should not happen when decreasing, but handle gracefully
+                pass
+
+
 class RotateLeftButton(NoSelectStatic):
     """Button for rotating the entire window list left."""
 
@@ -749,6 +826,8 @@ class TopBar(Horizontal):
         yield RotateLeftButton(BUTTON_SYMBOLS["rotate_left"], window=self.window, classes="windowbutton")
         yield RotateRightButton(BUTTON_SYMBOLS["rotate_right"], window=self.window, classes="windowbutton")
         yield TilingButton(BUTTON_SYMBOLS["tiling"], window=self.window, classes="windowbutton")
+        yield GapDecreaseButton(BUTTON_SYMBOLS["gap_decrease"], window=self.window, classes="windowbutton")
+        yield GapIncreaseButton(BUTTON_SYMBOLS["gap_increase"], window=self.window, classes="windowbutton")
         yield ToggleFloatingButton(BUTTON_SYMBOLS["toggle_floating"], window=self.window, classes="windowbutton")
         yield MinimizeButton(BUTTON_SYMBOLS["minimize"], window=self.window, classes="windowbutton")
         if self.window.allow_maximize_window:

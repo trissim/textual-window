@@ -57,6 +57,9 @@ class WindowManager(DOMNode):
     tiling_layout: reactive[TilingLayout] = reactive(TilingLayout.FLOATING)
     """The current tiling layout mode for automatic window arrangement."""
 
+    window_gap: reactive[int] = reactive(0)
+    """The vertical gap size in pixels around and between tiled windows. Horizontal gap is automatically 2x this value."""
+
 
 
     def __init__(self) -> None:
@@ -401,7 +404,7 @@ class WindowManager(DOMNode):
         # Calculate tiling positions for all windows
         container_size = self.app.screen.size
         try:
-            positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size)
+            positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size, self.window_gap)
         except ValueError as e:
             # Graceful degradation: fall back to floating mode on tiling calculation failure
             self.log.warning(f"Tiling calculation failed, falling back to floating mode: {e}")
@@ -438,7 +441,7 @@ class WindowManager(DOMNode):
         # Calculate tiling positions for all windows
         container_size = self.app.screen.size
         try:
-            positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size)
+            positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size, self.window_gap)
         except ValueError as e:
             # Graceful degradation: fall back to floating mode on tiling calculation failure
             self.log.warning(f"Tiling calculation failed, falling back to floating mode: {e}")
@@ -473,7 +476,7 @@ class WindowManager(DOMNode):
         # Calculate new positions and sizes for all windows
         container_size = self.app.screen.size
         try:
-            positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size)
+            positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size, self.window_gap)
         except ValueError as e:
             # Graceful degradation: fall back to floating mode on tiling calculation failure
             self.log.warning(f"Retiling failed, falling back to floating mode: {e}")
@@ -521,7 +524,7 @@ class WindowManager(DOMNode):
         # Calculate new positions and sizes for windows in the specified order
         container_size = self.app.screen.size
         try:
-            positions = calculate_tiling_positions(ordered_windows, self.tiling_layout, container_size)
+            positions = calculate_tiling_positions(ordered_windows, self.tiling_layout, container_size, self.window_gap)
         except ValueError as e:
             # Graceful degradation: fall back to floating mode on tiling calculation failure
             self.log.warning(f"Retiling with order failed, falling back to floating mode: {e}")
@@ -558,6 +561,20 @@ class WindowManager(DOMNode):
             self._handle_state_conflicts_before_tiling()
 
             # Only retile if we have windows and are switching to a tiling mode
+            if self._windows:
+                self._retile_all_windows()
+
+    def watch_window_gap(self, value: int) -> None:
+        """Reactive watcher for window gap changes.
+
+        When the window gap changes, automatically retile all windows
+        to apply the new gap spacing.
+
+        Args:
+            value: The new gap value in pixels
+        """
+        if self.tiling_layout != TilingLayout.FLOATING:
+            # Only retile if we're in a tiling mode and have windows
             if self._windows:
                 self._retile_all_windows()
 
@@ -607,6 +624,40 @@ class WindowManager(DOMNode):
     def disable_tiling(self) -> None:
         """Disable tiling and return to floating window mode."""
         self.tiling_layout = TilingLayout.FLOATING
+
+    def set_window_gap(self, gap: int) -> None:
+        """Set the vertical gap around and between tiled windows.
+
+        Args:
+            gap: Vertical gap size in pixels around and between windows (must be >= 0).
+                 Horizontal gap is automatically set to 2x this value.
+
+        Raises:
+            ValueError: If gap is negative or would make windows too small
+        """
+        if gap < 0:
+            raise ValueError(f"Window gap must be >= 0, got: {gap}")
+
+        # Validate gap doesn't violate minimum window sizes if tiling is active
+        if self.tiling_layout != TilingLayout.FLOATING and self._windows:
+            open_windows = [w for w in self._windows.values() if w.open_state]
+            if open_windows:
+                container_size = self.app.screen.size
+                try:
+                    # Test if the gap would work with current layout
+                    calculate_tiling_positions(open_windows, self.tiling_layout, container_size, gap)
+                except ValueError as e:
+                    raise ValueError(f"Gap {gap} is too large for current layout: {e}")
+
+        self.window_gap = gap
+
+    def get_window_gap(self) -> int:
+        """Get the current vertical gap around and between tiled windows.
+
+        Returns:
+            The current vertical gap size in pixels. Horizontal gap is 2x this value.
+        """
+        return self.window_gap
 
 
 
