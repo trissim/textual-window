@@ -85,11 +85,6 @@ def _get_ui_bar_info(app) -> tuple[int, int, int, int]:
     except Exception:
         pass
 
-    # Debug logging
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"UI Bar Info: top={top_height}, bottom={bottom_height}, left={left_width}, right={right_width}")
-
     return (top_height, bottom_height, left_width, right_width)
 
 
@@ -776,18 +771,12 @@ class Window(Widget):
 
             # Maximize to full screen
             container_offset = calculate_window_container_offset(self.app)
-            available_space = calculate_available_screen_space(self.app)
-
-            self.log.info(f"Window {self.id}: Maximizing - container_offset={container_offset}, available_space={available_space}")
-            self.log.info(f"Window {self.id}: Screen size={self.app.screen.size}")
 
             self.styles.width = self.max_width
             self.styles.height = self.max_height
 
             # Position window at the correct offset to account for UI bars
             self.offset = container_offset
-
-            self.log.info(f"Window {self.id}: After maximize - size={self.size}, offset={self.offset}")
 
             self._top_bar.maximize_button.swap_in_restore_icon()
             # Don't call clamp_into_parent_area for maximize - we want exact positioning
