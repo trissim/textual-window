@@ -650,10 +650,6 @@ class Resizer(NoSelectStatic):
     def __init__(self, content: VisualType, window: Window, **kwargs: Any) -> None:
         super().__init__(content=content, **kwargs)
         self.window = window
-        # Mouse event batching for performance
-        self._last_update_time = 0.0
-        self._last_mouse_position = Offset(0, 0)
-        self._update_pending = False
 
     def set_max_min(self) -> None:
 
@@ -677,36 +673,11 @@ class Resizer(NoSelectStatic):
 
         # App.mouse_captured refers to the widget that is currently capturing mouse events.
         if self.app.mouse_captured == self:
-            # Always track the latest mouse position - never drop events
-            self._last_mouse_position = event.screen_offset
+            total_delta = event.screen_offset - self.position_on_down
+            new_size = self.size_on_down + total_delta
 
-            # Schedule update if not already pending
-            if not self._update_pending:
-                current_time = time.time()
-
-                # Check if enough time has passed for immediate update (60fps = ~16.67ms)
-                if current_time - self._last_update_time >= 0.0167:
-                    self._apply_resize()
-                else:
-                    # Schedule for next frame
-                    self._update_pending = True
-                    self.call_after_refresh(self._apply_resize)
-
-    def _apply_resize(self) -> None:
-        """Apply resize based on latest mouse position."""
-        assert isinstance(self.window.parent, Widget)
-        assert self.window.styles.width is not None
-        assert self.window.styles.height is not None
-
-        total_delta = self._last_mouse_position - self.position_on_down
-        new_size = self.size_on_down + total_delta
-
-        self.window.styles.width = clamp(new_size.width, self.min_width, self.max_width)
-        self.window.styles.height = clamp(new_size.height, self.min_height, self.max_height)
-
-        # Reset for next batch
-        self._last_update_time = time.time()
-        self._update_pending = False
+            self.window.styles.width = clamp(new_size.width, self.min_width, self.max_width)
+            self.window.styles.height = clamp(new_size.height, self.min_height, self.max_height)
 
             # * Explanation:
             # Get the absolute position of the mouse right now (event.screen_offset),
@@ -744,44 +715,17 @@ class TitleBar(NoSelectStatic):
     def __init__(self, window_title: str, window: Window, **kwargs: Any):
         super().__init__(content=window_title, **kwargs)
         self.window = window
-        # Mouse event batching for performance
-        self._last_update_time = 0.0
-        self._accumulated_delta = Offset(0, 0)
-        self._update_pending = False
 
     def on_mouse_move(self, event: events.MouseMove) -> None:
 
         if self.app.mouse_captured == self:
-            # Always accumulate movement - never drop events
-            self._accumulated_delta += event.delta
-
-            # Schedule update if not already pending
-            if not self._update_pending:
-                current_time = time.time()
-
-                # Check if enough time has passed for immediate update (60fps = ~16.67ms)
-                if current_time - self._last_update_time >= 0.0167:
-                    self._apply_accumulated_movement()
-                else:
-                    # Schedule for next frame
-                    self._update_pending = True
-                    self.call_after_refresh(self._apply_accumulated_movement)
-
-    def _apply_accumulated_movement(self) -> None:
-        """Apply all accumulated movement in a single operation."""
-        if self._accumulated_delta != Offset(0, 0):
-            # Simple approach: just use normal CSS offset with batching
+            # Simple approach: just use normal CSS offset
             if not self.window.snap_state:  # not locked, can move freely
-                self.window.offset = self.window.offset + self._accumulated_delta
+                self.window.offset = self.window.offset + event.delta
             else:  # else, if locked to parent:
                 assert isinstance(self.window.parent, Widget)
-                self.window.offset = self.window.offset + self._accumulated_delta  # first move into place normally
+                self.window.offset = self.window.offset + event.delta  # first move into place normally
                 self.window.clamp_into_parent_area()  # then clamp back to parent area.
-
-        # Reset for next batch
-        self._accumulated_delta = Offset(0, 0)
-        self._last_update_time = time.time()
-        self._update_pending = False
 
                 # Setting the offset and then clamping it again afterwards might not seem efficient,
                 # but it looks the best, and least glitchy. I tried doing it in a single operation, and
