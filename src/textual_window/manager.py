@@ -214,6 +214,10 @@ class WindowManager(DOMNode):
         if self._windowbar:
             self._windowbar.update_window_button_state(window, state)
 
+        # Trigger retiling when windows open/close if tiling is active
+        if self.tiling_layout != TilingLayout.FLOATING:
+            self._retile_all_windows()
+
     ######################
     # ~ Window Methods ~ #
     ######################

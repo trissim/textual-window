@@ -772,8 +772,10 @@ class Window(Widget):
             # Maximize to full screen
             container_offset = calculate_window_container_offset(self.app)
 
-            self.styles.width = self.max_width
-            self.styles.height = self.max_height
+            # Use full available screen space for maximize, not tiling-constrained max size
+            available_space = calculate_available_screen_space(self.app)
+            self.styles.width = available_space.width
+            self.styles.height = available_space.height
 
             # Position window at the correct offset to account for UI bars
             self.offset = container_offset
