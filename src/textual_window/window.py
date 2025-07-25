@@ -34,6 +34,7 @@ from textual.reactive import reactive
 # Local imports
 from textual_window.manager import window_manager
 from textual_window.windowcomponents import Resizer, TopBar, BottomBar
+from textual_window.tiling import TilingLayout
 
 __all__ = [
     "Window",
@@ -292,6 +293,12 @@ class Window(Widget):
         self.starting_height: int | None = None  # The starting height of the window.
         self.saved_size: Size | None = None  # Save the size of the window when it is maximized.
         self.saved_offset: Offset | None = None  # Save the offset of the window when it is maximized.
+
+        # Tiling state tracking
+        self.was_tiled_before_maximize: bool = False  # Track if window was tiled before maximize
+        self.saved_tiling_position: Offset | None = None  # Tiling position before maximize
+        self.saved_tiling_size: Size | None = None  # Tiling size before maximize
+
         self.max_width: int | None = None  # The maximum width of the window.
         self.max_height: int | None = None  # The maximum height of the window.
         self.min_width: int
@@ -393,7 +400,20 @@ class Window(Widget):
             self.manager.signal_window_state(self, self.display)
 
     async def _calculate_all_sizes(self) -> tuple[Size, Size, Size]:
-        "Returns tuple of `(min_size, max_size)`"
+        "Returns tuple of `(size, min_size, max_size)`"
+
+        # Check if tiling mode is active
+        if self.manager.tiling_layout != TilingLayout.FLOATING:
+            try:
+                tiling_size = self.manager.get_tiling_size(self)
+                # For tiling mode, use tiling size as both actual and max size
+                # Keep reasonable minimum sizes
+                min_size = Size(12, 6)  # Default minimum window size
+                max_size = tiling_size
+                return (tiling_size, min_size, max_size)
+            except ValueError:
+                # Fall back to normal size calculation if tiling calculation fails
+                pass
 
         assert isinstance(self.parent, Widget)
         assert self.parent.size.width is not None
@@ -463,6 +483,18 @@ class Window(Widget):
     async def _calculate_starting_position(self) -> Offset:
         """Returns the starting position of the window
         based on the parent size and starting position arguments."""
+
+        # Check if tiling mode is active
+        if self.manager.tiling_layout != TilingLayout.FLOATING:
+            try:
+                tiling_position = self.manager.get_tiling_position(self)
+                if not self.initialized:
+                    self.initialized = True
+                    self.post_message(self.Initialized(self))
+                return tiling_position
+            except ValueError:
+                # Fall back to normal positioning if tiling calculation fails
+                pass
 
         assert self.starting_width
         assert self.starting_height
@@ -621,19 +653,48 @@ class Window(Widget):
     def watch_maximize_state(self, value: bool) -> None:
 
         if value:
+            # Check if window is currently tiled
+            self.was_tiled_before_maximize = (self.manager.tiling_layout != TilingLayout.FLOATING)
+
+            if self.was_tiled_before_maximize:
+                # Save current tiling position and size
+                try:
+                    self.saved_tiling_position = self.manager.get_tiling_position(self)
+                    self.saved_tiling_size = self.manager.get_tiling_size(self)
+                except ValueError:
+                    # Fallback if tiling calculation fails
+                    self.saved_tiling_position = self.offset
+                    self.saved_tiling_size = Size(self.size.width, self.size.height)
+
+            # Save current size and position for normal maximize behavior
             self.saved_size = Size(self.size.width, self.size.height)
             self.saved_offset = Offset(self.offset.x, self.offset.y)
+
+            # Maximize to full screen
             self.styles.width = self.max_width
             self.styles.height = self.max_height
             self._top_bar.maximize_button.swap_in_restore_icon()
             self.call_after_refresh(self.clamp_into_parent_area)
         else:
+            # Restoring from maximize
             assert self.saved_size is not None, "This should never happen."
             assert self.saved_offset is not None, "This should never happen."
-            self.styles.width = self.saved_size.width
-            self.styles.height = self.saved_size.height
-            self.offset = self.saved_offset
+
+            if self.was_tiled_before_maximize and self.manager.tiling_layout != TilingLayout.FLOATING:
+                # Return to tiling layout - let the manager retile all windows
+                self.manager._retile_all_windows()
+            else:
+                # Return to saved floating position and size
+                self.styles.width = self.saved_size.width
+                self.styles.height = self.saved_size.height
+                self.offset = self.saved_offset
+
             self._top_bar.maximize_button.swap_in_maximize_icon()
+
+            # Reset tiling state tracking
+            self.was_tiled_before_maximize = False
+            self.saved_tiling_position = None
+            self.saved_tiling_size = None
 
     ###############
     # ~ Actions ~ #

@@ -14,15 +14,21 @@ to all of them."""
 
 # Python imports
 from __future__ import annotations
-from typing import TYPE_CHECKING, Callable, Awaitable
+from typing import TYPE_CHECKING, Callable, Awaitable, List
 
 if TYPE_CHECKING:
     from textual_window.window import Window
     from textual_window.windowbar import WindowBar
     import rich.repr
 
+# Local imports
+from textual_window.tiling import TilingLayout, calculate_tiling_positions
+
 # Textual imports
 from textual.dom import DOMNode
+from textual.reactive import reactive
+from textual.geometry import Offset, Size
+from textual.binding import Binding
 
 __all__ = [
     "window_manager",
@@ -47,11 +53,18 @@ class WindowManager(DOMNode):
     from textual_window import window_manager
     ```"""
 
+    # Reactive properties
+    tiling_layout: reactive[TilingLayout] = reactive(TilingLayout.FLOATING)
+    """The current tiling layout mode for automatic window arrangement."""
+
+
+
     def __init__(self) -> None:
         super().__init__()
 
         #! self._windows could possibly be reactive?
         self._windows: dict[str, Window] = {}  # Dictionary to store windows by their ID
+        self._window_order: list[str] = []  # Track window order for tiling
         self._windowbar: WindowBar | None = None
         self._last_focused_window: Window | None = None
         self._recent_focus_order: list[Window] = []
@@ -205,12 +218,17 @@ class WindowManager(DOMNode):
     async def window_ready(self, window: Window) -> bool | None:
         # called by Window._dom_ready()
 
+        result = None
         if self._windowbar:
             button_worker = self._windowbar.add_window_button(window)  # type: ignore[unused-ignore]
             await button_worker.wait()
-            return True
-        else:
-            return None
+            result = True
+
+        # Trigger retiling when new windows are fully initialized
+        if self.tiling_layout != TilingLayout.FLOATING:
+            self._retile_all_windows()
+
+        return result
 
     def register_window(self, window: Window) -> None:
         """Used by windows to register with the manager.
@@ -220,6 +238,9 @@ class WindowManager(DOMNode):
 
         if window.id:
             self._windows[window.id] = window
+            # Add to window order for tiling
+            if window.id not in self._window_order:
+                self._window_order.append(window.id)
         else:
             raise ValueError(
                 "Window ID is not set. "
@@ -235,6 +256,9 @@ class WindowManager(DOMNode):
 
         if window.id in self._windows:
             self._windows.pop(window.id)
+            # Remove from window order for tiling
+            if window.id in self._window_order:
+                self._window_order.remove(window.id)
             self.log.debug(f"func unregister_window: Unregistered {window.id} from the manager.")
         else:
             raise ValueError(
@@ -255,6 +279,10 @@ class WindowManager(DOMNode):
                 self._checked_in_closing_windows = 0
                 self._num_of_temporary_windows = 0
                 self.call_after_refresh(lambda: setattr(self, "closing_in_progress", False))
+
+        # Trigger retiling when windows are removed
+        if self.tiling_layout != TilingLayout.FLOATING:
+            self._retile_all_windows()
 
     def change_window_focus_order(self, window: Window) -> None:
         """recent_focus_order attribute is read by the WindowSwitcher to display
@@ -344,6 +372,243 @@ class WindowManager(DOMNode):
 
         for window in self._windows.values():
             await window.reset_window()
+
+    #########################
+    # ~ Tiling Methods ~ #
+    #########################
+
+    def get_tiling_position(self, window: Window) -> Offset:
+        """Get the tiling position for a specific window.
+
+        Args:
+            window: The window to get the position for
+
+        Returns:
+            Offset representing the window's position in the current tiling layout
+
+        Raises:
+            ValueError: If window is not found in tiling calculation results
+        """
+        if self.tiling_layout == TilingLayout.FLOATING:
+            raise ValueError("Cannot get tiling position when in floating mode")
+
+        # Get all open windows for tiling calculation
+        open_windows = [w for w in self._windows.values() if w.open_state]
+
+        if not open_windows:
+            return Offset(0, 0)
+
+        # Calculate tiling positions for all windows
+        container_size = self.app.screen.size
+        try:
+            positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size)
+        except ValueError as e:
+            # Graceful degradation: fall back to floating mode on tiling calculation failure
+            self.log.warning(f"Tiling calculation failed, falling back to floating mode: {e}")
+            self.tiling_layout = TilingLayout.FLOATING
+            raise ValueError(f"Tiling calculation failed: {e}")
+
+        if window.id not in positions:
+            raise ValueError(f"Window {window.id} not found in tiling calculation results")
+
+        position, _ = positions[window.id]
+        return position
+
+    def get_tiling_size(self, window: Window) -> Size:
+        """Get the tiling size for a specific window.
+
+        Args:
+            window: The window to get the size for
+
+        Returns:
+            Size representing the window's size in the current tiling layout
+
+        Raises:
+            ValueError: If window is not found in tiling calculation results
+        """
+        if self.tiling_layout == TilingLayout.FLOATING:
+            raise ValueError("Cannot get tiling size when in floating mode")
+
+        # Get all open windows for tiling calculation
+        open_windows = [w for w in self._windows.values() if w.open_state]
+
+        if not open_windows:
+            return Size(0, 0)
+
+        # Calculate tiling positions for all windows
+        container_size = self.app.screen.size
+        try:
+            positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size)
+        except ValueError as e:
+            # Graceful degradation: fall back to floating mode on tiling calculation failure
+            self.log.warning(f"Tiling calculation failed, falling back to floating mode: {e}")
+            self.tiling_layout = TilingLayout.FLOATING
+            raise ValueError(f"Tiling calculation failed: {e}")
+
+        if window.id not in positions:
+            raise ValueError(f"Window {window.id} not found in tiling calculation results")
+
+        _, size = positions[window.id]
+        return size
+
+    def _retile_all_windows(self) -> None:
+        """Retile all open windows according to the current tiling layout.
+
+        This method recalculates positions and sizes for all open windows
+        and applies them immediately. Follows the pattern of bulk operations
+        like minimize_all_windows().
+        """
+        if self.tiling_layout == TilingLayout.FLOATING:
+            return  # No retiling needed in floating mode
+
+        # Get all open windows for tiling in the correct order
+        open_windows = []
+        for window_id in self._window_order:
+            if window_id in self._windows and self._windows[window_id].open_state:
+                open_windows.append(self._windows[window_id])
+
+        if not open_windows:
+            return  # No windows to retile
+
+        # Calculate new positions and sizes for all windows
+        container_size = self.app.screen.size
+        try:
+            positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size)
+        except ValueError as e:
+            # Graceful degradation: fall back to floating mode on tiling calculation failure
+            self.log.warning(f"Retiling failed, falling back to floating mode: {e}")
+            self.tiling_layout = TilingLayout.FLOATING
+            return
+
+        # Apply new positions and sizes to each window
+        for window in open_windows:
+            if window.id in positions:
+                position, size = positions[window.id]
+
+                # Update window size
+                window.styles.width = size.width
+                window.styles.height = size.height
+
+                # Update window position
+                window.offset = position
+
+                # Update stored size values for consistency
+                window.starting_width = size.width
+                window.starting_height = size.height
+
+    def _retile_windows_with_order(self, ordered_windows: List[Window]) -> None:
+        """Retile windows using a specific order.
+
+        This method allows reordering windows in the tiling layout.
+
+        Args:
+            ordered_windows: List of windows in the desired order
+        """
+        if self.tiling_layout == TilingLayout.FLOATING:
+            return  # No retiling needed in floating mode
+
+        if not ordered_windows:
+            return  # No windows to retile
+
+        # Update the internal window order to match the new order
+        new_order = [w.id for w in ordered_windows]
+        # Keep windows not in the ordered list at the end
+        for window_id in self._window_order:
+            if window_id not in new_order:
+                new_order.append(window_id)
+        self._window_order = new_order
+
+        # Calculate new positions and sizes for windows in the specified order
+        container_size = self.app.screen.size
+        try:
+            positions = calculate_tiling_positions(ordered_windows, self.tiling_layout, container_size)
+        except ValueError as e:
+            # Graceful degradation: fall back to floating mode on tiling calculation failure
+            self.log.warning(f"Retiling with order failed, falling back to floating mode: {e}")
+            self.tiling_layout = TilingLayout.FLOATING
+            return
+
+        # Apply new positions and sizes to each window
+        for window in ordered_windows:
+            if window.id in positions:
+                position, size = positions[window.id]
+
+                # Update window size
+                window.styles.width = size.width
+                window.styles.height = size.height
+
+                # Update window position
+                window.offset = position
+
+                # Update stored size values for consistency
+                window.starting_width = size.width
+                window.starting_height = size.height
+
+    def watch_tiling_layout(self, value: TilingLayout) -> None:
+        """Reactive watcher for tiling layout changes.
+
+        When the tiling layout changes, automatically retile all windows
+        to apply the new layout.
+
+        Args:
+            value: The new TilingLayout value
+        """
+        if value != TilingLayout.FLOATING:
+            # Handle state conflicts: restore maximized windows before tiling
+            self._handle_state_conflicts_before_tiling()
+
+            # Only retile if we have windows and are switching to a tiling mode
+            if self._windows:
+                self._retile_all_windows()
+
+    def _handle_state_conflicts_before_tiling(self) -> None:
+        """Handle state conflicts before applying tiling.
+
+        Restores maximized windows to their normal state so they can be tiled properly.
+        """
+        for window in self._windows.values():
+            if window.maximize_state:
+                # Restore maximized windows so they can be tiled
+                window.maximize_state = False
+
+    #################################
+    # ~ Tiling Mode Switching API ~ #
+    #################################
+
+    def set_tiling_layout(self, layout: TilingLayout) -> None:
+        """Set the tiling layout mode programmatically.
+
+        Args:
+            layout: The TilingLayout to switch to
+        """
+        self.tiling_layout = layout
+
+    def get_tiling_layout(self) -> TilingLayout:
+        """Get the current tiling layout mode.
+
+        Returns:
+            The current TilingLayout
+        """
+        return self.tiling_layout
+
+    def enable_tiling(self, layout: TilingLayout) -> None:
+        """Enable tiling with the specified layout.
+
+        Args:
+            layout: The TilingLayout to enable (must not be FLOATING)
+
+        Raises:
+            ValueError: If layout is FLOATING
+        """
+        if layout == TilingLayout.FLOATING:
+            raise ValueError("Cannot enable tiling with FLOATING layout. Use disable_tiling() instead.")
+        self.tiling_layout = layout
+
+    def disable_tiling(self) -> None:
+        """Disable tiling and return to floating window mode."""
+        self.tiling_layout = TilingLayout.FLOATING
+
+
 
 
 window_manager = WindowManager()  # ~ <-- Create a window manager instance.

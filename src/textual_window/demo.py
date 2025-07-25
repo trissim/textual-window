@@ -47,6 +47,16 @@ see a global context menu.
 Note that for transparency to work, your terminal must support it and you must have it enabled. \
 Also note that it's known to not look great if using any light themes or system settings."""
 
+static_performance_test = """\
+Performance Test Windows:
+- High Performance: Very smooth but higher CPU usage
+- Default Performance: Balanced performance and smoothness
+- Low Performance: Lower CPU usage but less smooth
+- Very Low Performance: Minimal CPU usage, noticeable lag
+
+Try dragging these windows to feel the difference!
+"""
+
 static_controls = """\
 [$accent]F1[/$accent]: Window Switcher
 [$accent]Ctrl+e[/$accent]: WindowBar
@@ -165,6 +175,43 @@ class WindowDemo(App[None]):
             # 3) Custom widget with compose method:
             yield MyWindow()
 
+            # 4) Performance test windows:
+            yield Window(
+                Static(static_performance_test),
+                id="perf_high_performance",
+                icon="🚀",
+                starting_horizontal="left",
+                starting_vertical="top",
+                allow_resize=True,
+            )
+
+            yield Window(
+                Static("Default performance - Balanced"),
+                id="perf_default_performance",
+                icon="⚖️",
+                starting_horizontal="centerleft",
+                starting_vertical="top",
+                allow_resize=True,
+            )
+
+            yield Window(
+                Static("Battery saving mode"),
+                id="perf_low_performance",
+                icon="🔋",
+                starting_horizontal="centerright",
+                starting_vertical="top",
+                allow_resize=True,
+            )
+
+            yield Window(
+                Static("Minimal CPU usage"),
+                id="perf_very_low_performance",
+                icon="🐌",
+                starting_horizontal="right",
+                starting_vertical="top",
+                allow_resize=True,
+            )
+
             with Container(id="center_content"):
                 with Horizontal(id="main_info_container", classes="upper_info_container"):
                     with Horizontal(classes="upper_info_container left"):
@@ -253,6 +300,7 @@ class WindowDemo(App[None]):
         icons = ["🚀", "📺", "🔨", "🛒", "🔒", "💾"]
 
         new_window = Window(
+            Static(f"Dynamic Window #{self.window_counter}\nTry dragging to test performance!"),
             id=f"window_{self.window_counter}",
             icon=random.choice(icons),
             start_open=True,
