@@ -36,6 +36,109 @@ from textual_window.manager import window_manager
 from textual_window.windowcomponents import Resizer, TopBar, BottomBar
 from textual_window.tiling import TilingLayout
 
+
+def _get_ui_bar_info(app) -> tuple[int, int, int, int]:
+    """Get UI bar dimensions and positions.
+
+    Returns:
+        tuple: (top_bars_height, bottom_bars_height, left_bars_width, right_bars_width)
+    """
+    top_height = 0
+    bottom_height = 0
+    left_width = 0
+    right_width = 0
+
+    # Check for WindowBar (always at bottom in OpenHCS)
+    try:
+        from textual_window.windowbar import WindowBar
+        window_bar = app.query_one(WindowBar)
+        if window_bar.display:
+            if window_bar.dock == "bottom":
+                bottom_height += window_bar.size.height
+            elif window_bar.dock == "top":
+                top_height += window_bar.size.height
+    except Exception:
+        pass
+
+    # Check for Textual Header (always at top)
+    try:
+        from textual.widgets import Header
+        header = app.query_one(Header)
+        top_height += header.size.height
+    except Exception:
+        pass
+
+    # Check for Textual Footer (always at bottom)
+    try:
+        from textual.widgets import Footer
+        footer = app.query_one(Footer)
+        bottom_height += footer.size.height
+    except Exception:
+        pass
+
+    # Check for custom StatusBar (always at top in OpenHCS)
+    try:
+        status_bars = app.query("StatusBar")
+        for status_bar in status_bars:
+            if hasattr(status_bar, 'size') and hasattr(status_bar, 'display') and status_bar.display:
+                top_height += status_bar.size.height
+    except Exception:
+        pass
+
+    # Debug logging
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"UI Bar Info: top={top_height}, bottom={bottom_height}, left={left_width}, right={right_width}")
+
+    return (top_height, bottom_height, left_width, right_width)
+
+
+def calculate_available_screen_space(app) -> Size:
+    """Calculate available screen space accounting for all UI bars.
+
+    This function calculates the actual usable screen space by subtracting
+    the space taken up by UI bars at their correct positions.
+
+    Args:
+        app: The Textual app instance
+
+    Returns:
+        Size: Available screen space for windows
+    """
+    # Start with full screen size
+    full_width = app.screen.size.width
+    full_height = app.screen.size.height
+
+    # Get UI bar dimensions
+    top_height, bottom_height, left_width, right_width = _get_ui_bar_info(app)
+
+    # Calculate available space
+    available_width = full_width - left_width - right_width
+    available_height = full_height - top_height - bottom_height
+
+    # Ensure we don't go negative
+    available_width = max(1, available_width)
+    available_height = max(1, available_height)
+
+    return Size(available_width, available_height)
+
+
+def calculate_window_container_offset(app) -> Offset:
+    """Calculate the offset for the window container area.
+
+    This accounts for UI bars that push the window area away from (0,0).
+    For example, if there's a status bar at the top, windows should start
+    below it, not at y=0.
+
+    Args:
+        app: The Textual app instance
+
+    Returns:
+        Offset: The top-left corner of the available window area
+    """
+    top_height, bottom_height, left_width, right_width = _get_ui_bar_info(app)
+    return Offset(left_width, top_height)
+
 __all__ = [
     "Window",
     "WindowStylesDict",
@@ -432,17 +535,18 @@ class Window(Widget):
             raise ValueError(f"Minimum height must be set to an integer value on {self.id}")
 
         # MAX #
+        # Use available screen space for both width and height when not explicitly set
+        available_space = calculate_available_screen_space(self.app)
+
         if self.styles.max_width and self.styles.max_width.cells:
             max_width = self.styles.max_width.cells
         else:
-            # The max is actually None by default (unlike minimum which must be set).
-            # So if the max is not set, it will default to the parent size.
-            max_width = self.parent.size.width
+            max_width = available_space.width
 
         if self.styles.max_height and self.styles.max_height.cells:
             max_height = self.styles.max_height.cells
         else:
-            max_height = self.parent.size.height
+            max_height = available_space.height
 
         # NOTE: We will always have a max width and max height, and so we will also
         # by extension always have a width and height.
@@ -671,10 +775,22 @@ class Window(Widget):
             self.saved_offset = Offset(self.offset.x, self.offset.y)
 
             # Maximize to full screen
+            container_offset = calculate_window_container_offset(self.app)
+            available_space = calculate_available_screen_space(self.app)
+
+            self.log.info(f"Window {self.id}: Maximizing - container_offset={container_offset}, available_space={available_space}")
+            self.log.info(f"Window {self.id}: Screen size={self.app.screen.size}")
+
             self.styles.width = self.max_width
             self.styles.height = self.max_height
+
+            # Position window at the correct offset to account for UI bars
+            self.offset = container_offset
+
+            self.log.info(f"Window {self.id}: After maximize - size={self.size}, offset={self.offset}")
+
             self._top_bar.maximize_button.swap_in_restore_icon()
-            self.call_after_refresh(self.clamp_into_parent_area)
+            # Don't call clamp_into_parent_area for maximize - we want exact positioning
         else:
             # Restoring from maximize
             assert self.saved_size is not None, "This should never happen."

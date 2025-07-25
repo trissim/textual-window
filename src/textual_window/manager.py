@@ -402,7 +402,10 @@ class WindowManager(DOMNode):
             return Offset(0, 0)
 
         # Calculate tiling positions for all windows
-        container_size = self.app.screen.size
+        # Use available screen space and account for UI bar offset
+        from textual_window.window import calculate_available_screen_space, calculate_window_container_offset
+        container_size = calculate_available_screen_space(self.app)
+        container_offset = calculate_window_container_offset(self.app)
         try:
             positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size, self.window_gap)
         except ValueError as e:
@@ -415,7 +418,9 @@ class WindowManager(DOMNode):
             raise ValueError(f"Window {window.id} not found in tiling calculation results")
 
         position, _ = positions[window.id]
-        return position
+        # Adjust position by container offset to account for UI bars
+        adjusted_position = Offset(position.x + container_offset.x, position.y + container_offset.y)
+        return adjusted_position
 
     def get_tiling_size(self, window: Window) -> Size:
         """Get the tiling size for a specific window.
@@ -439,7 +444,9 @@ class WindowManager(DOMNode):
             return Size(0, 0)
 
         # Calculate tiling positions for all windows
-        container_size = self.app.screen.size
+        # Use available screen space instead of full screen size
+        from textual_window.window import calculate_available_screen_space
+        container_size = calculate_available_screen_space(self.app)
         try:
             positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size, self.window_gap)
         except ValueError as e:
@@ -474,7 +481,10 @@ class WindowManager(DOMNode):
             return  # No windows to retile
 
         # Calculate new positions and sizes for all windows
-        container_size = self.app.screen.size
+        # Use available screen space and account for UI bar offset
+        from textual_window.window import calculate_available_screen_space, calculate_window_container_offset
+        container_size = calculate_available_screen_space(self.app)
+        container_offset = calculate_window_container_offset(self.app)
         try:
             positions = calculate_tiling_positions(open_windows, self.tiling_layout, container_size, self.window_gap)
         except ValueError as e:
@@ -492,8 +502,9 @@ class WindowManager(DOMNode):
                 window.styles.width = size.width
                 window.styles.height = size.height
 
-                # Update window position
-                window.offset = position
+                # Update window position (adjust by container offset to account for UI bars)
+                adjusted_position = Offset(position.x + container_offset.x, position.y + container_offset.y)
+                window.offset = adjusted_position
 
                 # Update stored size values for consistency
                 window.starting_width = size.width
@@ -522,7 +533,10 @@ class WindowManager(DOMNode):
         self._window_order = new_order
 
         # Calculate new positions and sizes for windows in the specified order
-        container_size = self.app.screen.size
+        # Use available screen space and account for UI bar offset
+        from textual_window.window import calculate_available_screen_space, calculate_window_container_offset
+        container_size = calculate_available_screen_space(self.app)
+        container_offset = calculate_window_container_offset(self.app)
         try:
             positions = calculate_tiling_positions(ordered_windows, self.tiling_layout, container_size, self.window_gap)
         except ValueError as e:
@@ -540,8 +554,9 @@ class WindowManager(DOMNode):
                 window.styles.width = size.width
                 window.styles.height = size.height
 
-                # Update window position
-                window.offset = position
+                # Update window position (adjust by container offset to account for UI bars)
+                adjusted_position = Offset(position.x + container_offset.x, position.y + container_offset.y)
+                window.offset = adjusted_position
 
                 # Update stored size values for consistency
                 window.starting_width = size.width
@@ -642,7 +657,9 @@ class WindowManager(DOMNode):
         if self.tiling_layout != TilingLayout.FLOATING and self._windows:
             open_windows = [w for w in self._windows.values() if w.open_state]
             if open_windows:
-                container_size = self.app.screen.size
+                # Use available screen space instead of full screen size
+                from textual_window.window import calculate_available_screen_space
+                container_size = calculate_available_screen_space(self.app)
                 try:
                     # Test if the gap would work with current layout
                     calculate_tiling_positions(open_windows, self.tiling_layout, container_size, gap)
