@@ -619,6 +619,175 @@ class WindowManager(DOMNode):
         """
         self.tiling_layout = layout
 
+    #############################
+    # ~ Focus Navigation API ~ #
+    #############################
+
+    def focus_next_window(self) -> None:
+        """Focus the next window in the recent focus order."""
+        if not self._recent_focus_order:
+            return
+
+        current = self._last_focused_window
+        if not current:
+            # Focus first window if none focused
+            self._recent_focus_order[0].focus()
+            return
+
+        try:
+            current_index = self._recent_focus_order.index(current)
+            next_index = (current_index + 1) % len(self._recent_focus_order)
+            next_window = self._recent_focus_order[next_index]
+            if next_window.open_state:
+                next_window.focus()
+        except (ValueError, IndexError):
+            # Fallback to first window
+            if self._recent_focus_order:
+                self._recent_focus_order[0].focus()
+
+    def focus_previous_window(self) -> None:
+        """Focus the previous window in the recent focus order."""
+        if not self._recent_focus_order:
+            return
+
+        current = self._last_focused_window
+        if not current:
+            # Focus last window if none focused
+            self._recent_focus_order[-1].focus()
+            return
+
+        try:
+            current_index = self._recent_focus_order.index(current)
+            prev_index = (current_index - 1) % len(self._recent_focus_order)
+            prev_window = self._recent_focus_order[prev_index]
+            if prev_window.open_state:
+                prev_window.focus()
+        except (ValueError, IndexError):
+            # Fallback to last window
+            if self._recent_focus_order:
+                self._recent_focus_order[-1].focus()
+
+    ################################
+    # ~ Window Movement API ~ #
+    ################################
+
+    def move_focused_window_prev(self) -> None:
+        """Move the currently focused window to the previous position in tiling order."""
+        if not self._last_focused_window or self.tiling_layout == TilingLayout.FLOATING:
+            return  # No effect in floating mode or no focused window
+
+        # Get all open windows in the correct order
+        open_windows = []
+        for window_id in self._window_order:
+            if window_id in self._windows and self._windows[window_id].open_state:
+                open_windows.append(self._windows[window_id])
+
+        if len(open_windows) <= 1:
+            return  # Can't move if only one window
+
+        # Find current window index
+        try:
+            current_index = open_windows.index(self._last_focused_window)
+
+            # Remove window from current position
+            window = open_windows.pop(current_index)
+
+            # Insert at previous position (shift left, wrap around to end if at beginning)
+            new_index = (current_index - 1) % len(open_windows)
+            open_windows.insert(new_index, window)
+
+            # Retile with new order
+            self._retile_windows_with_order(open_windows)
+        except ValueError:
+            pass  # Window not found in list
+
+    def move_focused_window_next(self) -> None:
+        """Move the currently focused window to the next position in tiling order."""
+        if not self._last_focused_window or self.tiling_layout == TilingLayout.FLOATING:
+            return  # No effect in floating mode or no focused window
+
+        # Get all open windows in the correct order
+        open_windows = []
+        for window_id in self._window_order:
+            if window_id in self._windows and self._windows[window_id].open_state:
+                open_windows.append(self._windows[window_id])
+
+        if len(open_windows) <= 1:
+            return  # Can't move if only one window
+
+        # Find current window index
+        try:
+            current_index = open_windows.index(self._last_focused_window)
+
+            # Remove window from current position
+            window = open_windows.pop(current_index)
+
+            # Insert at next position (shift right, wrap around to beginning if at end)
+            new_index = current_index % len(open_windows)
+            open_windows.insert(new_index, window)
+
+            # Retile with new order
+            self._retile_windows_with_order(open_windows)
+        except ValueError:
+            pass  # Window not found in list
+
+    def rotate_window_order_left(self) -> None:
+        """Rotate all windows left in the tiling order."""
+        if self.tiling_layout == TilingLayout.FLOATING:
+            return  # No effect in floating mode
+
+        # Get all open windows in the correct order
+        open_windows = []
+        for window_id in self._window_order:
+            if window_id in self._windows and self._windows[window_id].open_state:
+                open_windows.append(self._windows[window_id])
+
+        if len(open_windows) <= 1:
+            return  # Can't rotate if only one window
+
+        # Rotate left: move first window to end
+        rotated_windows = open_windows[1:] + [open_windows[0]]
+
+        # Retile with new order
+        self._retile_windows_with_order(rotated_windows)
+
+    def rotate_window_order_right(self) -> None:
+        """Rotate all windows right in the tiling order."""
+        if self.tiling_layout == TilingLayout.FLOATING:
+            return  # No effect in floating mode
+
+        # Get all open windows in the correct order
+        open_windows = []
+        for window_id in self._window_order:
+            if window_id in self._windows and self._windows[window_id].open_state:
+                open_windows.append(self._windows[window_id])
+
+        if len(open_windows) <= 1:
+            return  # Can't rotate if only one window
+
+        # Rotate right: move last window to beginning
+        rotated_windows = [open_windows[-1]] + open_windows[:-1]
+
+        # Retile with new order
+        self._retile_windows_with_order(rotated_windows)
+
+    ############################
+    # ~ Gap Adjustment API ~ #
+    ############################
+
+    def adjust_window_gap(self, delta: int) -> None:
+        """Adjust the window gap by the specified delta.
+
+        Args:
+            delta: Amount to change the gap (positive to increase, negative to decrease)
+        """
+        new_gap = max(0, self.window_gap + delta)  # Ensure gap doesn't go below 0
+        try:
+            self.set_window_gap(new_gap)
+        except ValueError:
+            # Gap would be too large, ignore the adjustment
+            pass
+
     def get_tiling_layout(self) -> TilingLayout:
         """Get the current tiling layout mode.
 

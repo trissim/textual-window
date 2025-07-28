@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 import textual.events as events
 from textual.widget import Widget
 from textual import on, work
-from textual.geometry import clamp
+from textual.geometry import clamp, Size
 from textual.containers import Horizontal, Container
 from textual.screen import ModalScreen
 from textual.geometry import Offset
@@ -674,7 +674,11 @@ class Resizer(NoSelectStatic):
         # App.mouse_captured refers to the widget that is currently capturing mouse events.
         if self.app.mouse_captured == self:
             total_delta = event.screen_offset - self.position_on_down
-            new_size = self.size_on_down + total_delta
+            # Convert Size + Offset to Size by creating new Size object
+            new_size = Size(
+                self.size_on_down.width + total_delta.x,
+                self.size_on_down.height + total_delta.y
+            )
 
             self.window.styles.width = clamp(new_size.width, self.min_width, self.max_width)
             self.window.styles.height = clamp(new_size.height, self.min_height, self.max_height)
